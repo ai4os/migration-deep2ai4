@@ -49,23 +49,62 @@ function get-branch()
   echo $branch
 }
 
-# Configure repo URLs, retrieve names of defaults branches
+# function to replace standard old URL
+function replace-old-urls()
+{
+   sed -i -e "s,${DEEP_DEEPAAS_REPO_URL},${AI4_DEEPAAS_REPO_URL},gI" \
+   -e "s,${DEEP_DOCKERFILE_REPO_URL},${AI4_CODE_REPO_URL},gI" \
+   -e "s,deephdc/${DEEP_DOCKERFILE_REPO},ai4oshub/${AI4_CODE_REPO},gI" \
+   -e "s,${DEEP_CODE_REPO_URL},${AI4_CODE_REPO_URL},gI" \
+   -e "s,${DEEP_JENKINS_REPO_BADGE},${AI4_JENKINS_REPO_BADGE},gI" \
+   -e "s,${DEEP_JENKINS_REPO_URL},${AI4_JENKINS_REPO_URL},gI" $1
+}
+
+# function to check any mention of nc.deep-hybrid-datacloud.eu
+function check-old-nc()
+{
+  local file=$1
+  local old_nc="nc.deep-hybrid-datacloud.eu"
+  DEEP_NEXTCLOUD_MENTION=$(cat $file |grep -i $old_nc)
+  found=$?
+
+  if (( found==0 )); then
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "In the file ${file} found mention of the old Nextcloud, ${old_nc}"
+    echo "Please, consider updating the following string:"
+    echo " ${DEEP_NEXTCLOUD_MENTION}"
+    echo "FYI: AI4OS Nextcloud: https://share.services.ai4os.eu"
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    read -p "Press enter to continue"
+  fi
+  return $found # 0 - found, 1 - not found
+}
+
+# 1. Configure repo URLs, retrieve names of defaults branches
+echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+echo "1.'Configure Repos': We now configure old (deephdc) and new (ai4os) repos"
+echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+read -p "Press enter to continue"
+
 read -p "deephdc code repo (e.g. demo_app): " DEEP_CODE_REPO
 DEEP_CODE_REPO_URL=${DEEP_GITHUB_ORG}${DEEP_CODE_REPO}
+DEEP_CODE_REPO_URL="${DEEP_CODE_REPO_URL%/}"  # strip trailing slash (if any)
 check-url ${DEEP_CODE_REPO_URL}
 DEEP_CODE_REPO_BRANCH=$(get-branch ${DEEP_CODE_REPO_URL})
-echo "Default Branch: ${DEEP_CODE_REPO_BRANCH}"
+echo "Found Default Branch: ${DEEP_CODE_REPO_BRANCH}"
 
 echo ""
 read -p "deephdc Dockerfile repo (usually has 'DEEP-OC' in the name, e.g. DEEP-OC-demo_app): " DEEP_DOCKERFILE_REPO
 DEEP_DOCKERFILE_REPO_URL=${DEEP_GITHUB_ORG}${DEEP_DOCKERFILE_REPO}
+DEEP_DOCKERFILE_REPO_URL="${DEEP_DOCKERFILE_REPO_URL%/}"  # strip trailing slash (if any)
 check-url ${DEEP_DOCKERFILE_REPO_URL}
 DEEP_DOCKERFILE_REPO_BRANCH=$(get-branch ${DEEP_DOCKERFILE_REPO_URL})
-echo "Default Branch: ${DEEP_DOCKERFILE_REPO_BRANCH}"
+echo "Found Default Branch: ${DEEP_DOCKERFILE_REPO_BRANCH}"
 
 echo ""
 read -p "(new) ai4os-hub code repo (has to be created first, empty! e.g. ai4os-demo-app): " AI4_CODE_REPO
 AI4_CODE_REPO_URL=${AI4_GITHUB_ORG}${AI4_CODE_REPO}
+AI4_CODE_REPO_URL="${AI4_CODE_REPO_URL%/}"  # strip trailing slash (if any)
 check-url ${AI4_CODE_REPO_URL}
 AI4_CODE_REPO_BRANCH=${DEEP_CODE_REPO_BRANCH}
 read -p "Do you want to rename default branch (${DEEP_CODE_REPO_BRANCH})? (e.g. to 'main')? (Y/N) " -n 1 -r
@@ -74,11 +113,18 @@ if [[ $REPLY =~ ^[Yy]$ ]]
 then
    read -p "Please, give new name of the default branch: " AI4_CODE_REPO_BRANCH
 fi
-echo ${AI4_CODE_REPO_BRANCH}
 
 # Mirror old code repo to ai4os-hub
 echo ""
-echo "[INFO] We bare clone now $DEEP_CODE_REPO_URL"
+echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+echo "2.'Combined old deephdc code':"
+echo " * mirror ${DEEP_CODE_REPO_URL} to ${AI4_CODE_REPO_URL}"
+echo " * copy Dockerfile and metadata.json from ${DEEP_DOCKERFILE_REPO_URL}"
+echo " * rename branch, if requested"
+echo " * commmit changes to ${AI4_CODE_REPO_URL}"   
+echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+read -p "Press enter to continue"
+echo "[INFO] We bare clone $DEEP_CODE_REPO_URL"
 git clone --bare $DEEP_CODE_REPO_URL
 # go into cloned repo
 cd ${DEEP_CODE_REPO}.git
@@ -116,41 +162,85 @@ git commit -a -m "feat: migration-1, Add original Dockerfile, metadata.json"
 echo "[INFO] Added original Dockerfile, metadata.json, now pushing changes to ai4os-hub/"
 git push origin
 
-# Delete: .stestr.conf, Jenkinsfile, tox.ini
-git rm .stestr.conf
-git rm Jenkinsfile
-git rm tox.ini
-
-# Copy/Paste files: Jenkinsfile
+# 3. Delete/Re-add Jenkinsfile
+echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+echo "3.'Re-create Jenkins CI/CD': "
+echo " * re-create Jenkinsfile"
+echo " * create .sqa/config.yml"
+echo " * create .sqa/docker-compose.yml"
+echo " * commit changes to ${AI4_CODE_REPO_URL}"
+echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+read -p "Press enter to continue"
 cp ${SCRIPT_PATH}/cp-Jenkinsfile ./Jenkinsfile
-git add Jenkinsfile
+mkdir .sqa
+sed "s,AI4_CODE_REPO,${AI4_CODE_REPO},g" ${SCRIPT_PATH}/tmpl-sqa-config.yml > .sqa/config.yml
+AI4_CICD_DOCKER_IMAGE="indigodatacloud/ci-images:python3.6"
+echo "Please, provide CI/CD Image for the code testing, default is ${AI4_CICD_DOCKER_IMAGE}"
+PS3='Please enter your choice: '
+options=("indigodatacloud/ci-images:python3.6" "indigodatacloud/ci-images:python3.8" "indigodatacloud/ci-images:python3.10" "indigodatacloud/ci-images:python3.11" "Custom" "Use default")
+select opt in "${options[@]}"
+do
+    case $opt in
+        "indigodatacloud/ci-images:python3.6")
+            AI4_CICD_DOCKER_IMAGE=$opt
+            break
+            ;;
+        "indigodatacloud/ci-images:python3.8")
+            AI4_CICD_DOCKER_IMAGE=$opt
+            break
+            ;;
+        "indigodatacloud/ci-images:python3.10")
+            AI4_CICD_DOCKER_IMAGE=$opt
+            break
+            ;;
+        "indigodatacloud/ci-images:python3.11")
+            AI4_CICD_DOCKER_IMAGE=$opt
+            break
+            ;;
+        "Custom")
+            read -p "Provide a custom CI/CD image (e.g. deephdc/ci_cd-obj_detect_pytorch): " AI4_CICD_DOCKER_IMAGE
+            break
+            ;;
+        "Use default")
+            break
+            ;;
+        *) echo "invalid option $REPLY";;
+    esac
+done
+echo "[INFO] Configured CI/CD image for the code testing: ${AI4_CICD_DOCKER_IMAGE}"
+sed "s,AI4_CICD_DOCKER_IMAGE,${AI4_CICD_DOCKER_IMAGE},g" ${SCRIPT_PATH}/tmpl-sqa-docker-compose.yml > .sqa/docker-compose.yml
+git add Jenkinsfile .sqa/*
+git commit -a -m "feat: migration-2, add Jenkins CI/CD with JePL2"
+git push origin
 
 # Can UPDATE automatically, EXISTING files:
-# metadata.json : replace dockerfile_repo, docker_registry_repo, code, jenkins_badge, jenkins_url
-DEEP_JENKINS_BADGE="https://jenkins.indigo-datacloud.eu/buildStatus/icon?job=Pipeline-as-code/DEEP-OC-org/${DEEP_DOCKERFILE_REPO}/${DEEP_DOCKERFILE_REPO_BRANCH}"
-DEEP_JENKINS_URL="https://jenkins.indigo-datacloud.eu/job/Pipeline-as-code/job/DEEP-OC-org/job/${DEEP_DOCKERFILE_REPO}/job/${DEEP_DOCKERFILE_REPO_BRANCH}"
-AI4OS_JENKINS_BADGE="https://jenkins.services.ai4os.eu/buildStatus/icon?job=AI4OS-hub/${AI4_CODE_REPO}/${AI4_CODE_REPO_BRANCH}"
-AI4OS_JENKINS_URL="https://jenkins.services.ai4os.eu/job/Pipeline-as-code/job/AI4OS-hub/job/${AI4_CODE_REPO}/job/${AI4_CODE_REPO_BRANCH}/"
-sed -i -e "s:${DEEP_DOCKERFILE_REPO_URL}:${AI4_CODE_REPO_URL}:g" \
--e "s:deephdc\/${DEEP_CODE_REPO}:ai4oshub\/${AI4_CODE_REPO}:g" \
--e "s:${DEEP_CODE_REPO_URL}:${AI4_CODE_REPO_URL}:g" \
--e "s:${DEEP_JENKINS_BADGE}:${AI4OS_JENKINS_BADGE}:g" \
--e "s:${DEEP_JENKINS_URL}:${AI4OS_JENKINS_URL}:g" \
-metadata.json
+# metadata.json : replace deepaas_repo, dockerfile_repo, docker_registry_repo, code, jenkins_badge, jenkins_url
+DEEP_DEEPAAS_REPO_URL="https://github.com/indigo-dc/DEEPaaS"
+DEEP_JENKINS_REPO_BADGE="https://jenkins.indigo-datacloud.eu/buildStatus/icon?job=Pipeline-as-code/DEEP-OC-org/${DEEP_DOCKERFILE_REPO}/${DEEP_DOCKERFILE_REPO_BRANCH}"
+DEEP_JENKINS_REPO_URL="https://jenkins.indigo-datacloud.eu/job/Pipeline-as-code/job/DEEP-OC-org/job/${DEEP_DOCKERFILE_REPO}/job/${DEEP_DOCKERFILE_REPO_BRANCH}"
+AI4_DEEPAAS_REPO_URL="https://github.com/ai4os/DEEPaaS"
+AI4_JENKINS_REPO_BADGE="https://jenkins.services.ai4os.eu/buildStatus/icon?job=AI4OS-hub/${AI4_CODE_REPO}/${AI4_CODE_REPO_BRANCH}"
+AI4_JENKINS_REPO_URL="https://jenkins.services.ai4os.eu/job/AI4OS-hub/job/${AI4_CODE_REPO}/job/${AI4_CODE_REPO_BRANCH}/"
+
+replace-old-urls metadata.json
+check-old-nc metadata.json
+
+sed -i "s,http://github.com,https://github.com,gI" setup.cfg  # in case "http://" wrongly given for github.com
+replace-old-urls setup.cfg
+sed -i "s,%2F,/,gI" README.md # replace "%2F" code with "/"
+replace-old-urls README.md
+check-old-nc README.md
 
 exit 1
-
-# setup.cfg
-sed -i "s//" setup.cfg
-# README.md
-sed -i "s//" README.md
 
 # Can create with replacement:
 # tox.ini
 # .sqa/config.yml
 # .sqa/docker-compose.yml
 # JenkinsConstants.groovy
-
+# Delete: .stestr.conf, Jenkinsfile, tox.ini
+git rm .stestr.conf
+git rm tox.ini
 
 # Need to UPDATE MANUALLY:
 # Dockerfile
