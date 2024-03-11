@@ -42,7 +42,7 @@ replace_old_urls=$SCRIPT_PATH/replace-old-urls.sh
 check_old_nc=$SCRIPT_PATH/check-old-nc.sh
 
 # function to find and delete a piece of text/paragraph
-search_and_delete=$SCRIPT_PATH/search-and-delete.sh
+search_and_replace=$SCRIPT_PATH/search-and-replace.sh
 
 ## Let's start
 # 1. Configure repo URLs, retrieve names of defaults branches
@@ -170,30 +170,55 @@ echo " * test-requirements.txt / requirements-test.txt"
 echo " * commit changes to ${AI4_CODE_REPO_URL}"
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 read -p "Press enter to continue"
-
+echo ""
+echo "[INFO] Replacing and checking old URLs in Dockerfile..."
 $replace_old_urls Dockerfile
 $check_old_nc Dockerfile
 sed -i "s,$DEEP_CODE_REPO,$AI4_CODE_REPO,gI" Dockerfile  # replace remaining "DEEP_CODE_REPO"
-# delete old JupyterLab install
-$search_and_delete Dockerfile 2 0 "/ARG/ && /jlab/"
+echo ""
+echo "[INFO] Removing old pyVer config..."
 # delete old pyVer ARG
-$search_and_delete Dockerfile 2 0 "/ARG/ && /pyVer/"
-# delete old oneclient_ver ARG
-$search_and_delete Dockerfile 2 0 "/ARG/ && /oneclient_ver/"
-# delete old oneclient installation
-$search_and_delete Dockerfile 2 4 "/RUN/ && /get.onedata.org/"
+$search_and_replace Dockerfile "/ARG/ && /pyVer/"
+sed -i "/# pyVer/d" Dockerfile
+sed -i "s,\$pyVer,python3,gI" Dockerfile
+# delete python3 link
+$search_and_replace Dockerfile "/if/ && /python3/ && /then/" 0 5
+echo ""
+echo "[INFO] Updating default branch..."
+sed -i "s,branch=$DEEP_CODE_REPO_BRANCH,branch=$AI4_CODE_REPO_BRANCH,gI" Dockerfile
+echo ""
+echo "[INFO] Removing old JupyterLab install..."
+# delete old JupyterLab install
+$search_and_replace Dockerfile "/ARG/ && /jlab/"
 # delete old installation of Jupyterlab
-$search_and_delete Dockerfile 4 3 "/RUN/ && /jlab/ && /true/"
-#$search_and_delete Dockerfile 2 4 '^(?=.*RUN)(?=.*jlab=)'
+$search_and_replace Dockerfile "/ENV/ && /JUPYTER_CONFIG_DIR/" 1 0
+$search_and_replace Dockerfile "/RUN/ && /jlab/ && /true/" 0
+echo ""
+echo "[INFO] Removing Onedata installation..."
+# delete old oneclient_ver ARG
+$search_and_replace Dockerfile "/ARG/ && /oneclient_ver/" 1 0
+# delete old oneclient installation
+$search_and_replace Dockerfile "/RUN/ && /get.onedata.org/"
+#$search_and_replace Dockerfile 2 4 '^(?=.*RUN)(?=.*jlab=)'
+echo ""
+echo "[INFO] Removing FLAAT installation via Dockerfile..."
+$search_and_replace Dockerfile "/#/ && /FLAAT/" 1
+echo ""
+echo "[INFO] Removing old install of deep-start..."
+$search_and_replace Dockerfile "/RUN/ && /deep-start/" "" 2 ${SCRIPT_PATH}/tmpl-deep-start.docker
+echo ""
+echo "[INFO] Removing old call for deepaas-run"
+$search_and_replace Dockerfile "/CMD/ && /deepaas-run/" "" "" ${SCRIPT_PATH}/tmpl-cmd.docker
 
+read -p "Do you want now manually inspect Dockerfile (advised!)? (Y/N) " -n 1 -r
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+   "${EDITOR:-nano}" Dockerfile
+fi
 
 # find the name of "requirements.txt" file for tests
 AI4_CODE_REPO_TEST_REQUIREMENTS="test-requirements.txt"
 ls -1 |grep "requirements-test.txt"
 [[ $? -eq 0 ]] && AI4_CODE_REPO_TEST_REQUIREMENTS="requirements-test.txt"
-# ...........
-# ...........
-# ...........
 exit 1
 
 # 5. Delete/Re-add Jenkinsfile

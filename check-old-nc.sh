@@ -12,7 +12,10 @@ function check-old-nc()
     echo " ${DEEP_NEXTCLOUD_MENTION}"
     echo "FYI: AI4OS Nextcloud: https://share.services.ai4os.eu"
     echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-    read -p "Press enter to continue"
+    read -p "Do you want now manually modify $file (advised!)? (Y/N) " -n 1 -r
+	if [[ $REPLY =~ ^[Yy]$ ]]; then
+   	  "${EDITOR:-nano}" $file
+    fi
   fi
   return $found # 0 - found, 1 - not found
 }
