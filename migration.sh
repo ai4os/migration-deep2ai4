@@ -3,7 +3,7 @@
 echo "################### [WARNING] ##############################
  It is advised to configure your github credentials, e.g.
    git config --global credential.helper store
- Than create $HOME/.git-credentials and add
+ Then create $HOME/.git-credentials and add
    https://YourGithubUser:YourGithubToken@github.com
  Finally, do:
    chmod 400 .git-credentials
@@ -35,10 +35,10 @@ function check-url()
 # function to get default branch
 get_branch=$SCRIPT_PATH/get-branch.sh
 
-# function to replace standard old URL
+# function to replace standard old URLs
 replace_old_urls=$SCRIPT_PATH/replace-old-urls.sh
 
-# function to find and delete a piece of text/paragraph
+# function to find and replace a piece of text/paragraph
 search_and_replace=$SCRIPT_PATH/search-and-replace.sh
 
 # function to update requirements.txt with relevant versions
@@ -163,9 +163,9 @@ if [ "$deep_nc_found" -eq 0 ]; then
   echo "Directory: $PWD"
   echo "FYI: AI4OS Nextcloud: https://share.services.ai4os.eu"
   echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+  read -p "Press enter if you updated Nextcloud links or want to continue migration anyway"
+  echo ""
 fi
-read -p "Press enter if you updated Nextcloud links or want to continue migration anyway"
-echo ""
 git commit -a -m "feat: migration-2, Update files with AI4OS URL values"
 
 # 4. Update Dockerfile, requirements, and test-requirements. very much MANUAL process!
@@ -245,7 +245,6 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
    "${EDITOR:-nano}" $AI4_CODE_REPO_TEST_REQUIREMENTS
 fi
 
-exit 1
 git commit -a -m "feat: migration-3, update Dockerfile, requirements(-test).txt files"
 git push origin
 
@@ -317,4 +316,12 @@ git rm .stestr.conf
 git add Jenkinsfile JenkinsConstants.groovy tox.ini .sqa/*
 git commit -a -m "feat: migration-4, add Jenkins CI/CD with JePL2 (.sqa, tox.ini)"
 git push origin
+
+# 6. Try to build Docker image locally
+AI4_DOCKER_REPO=$(echo "ai4oshub/${AI_CODE_REPO}" | awk '{print tolower($0)}')
+echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+read -p "6. Do you want now try to build $AI4_DOCKER_REPO Docker image locally? (Y/N) " -n 1 -r
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+   docker build --no-cache -t $AI4_DOCKER_REPO
+fi
 
