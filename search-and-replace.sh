@@ -17,7 +17,6 @@ function search-and-replace()
   local file="$1"
   local pattern="$2"
 
-  cp $file $file.bkp # make file backup
   read-file $file lines
 
   # search for the pattern, find array index
@@ -48,9 +47,9 @@ function search-and-replace()
   # if search lines found, delete them
   if [ "$found" != 0 ]; then
     # print selected lines
-    echo "[Found following block ($i_before:$i_pattern:$i_after)]:"
+    echo ">>>>> Found following block ($i_before:$i_pattern:$i_after):"
     for (( i=$i_before; i<=$i_after; i++ )); do echo "${lines[$i]}"; done
-    read -p "[Do you want to delete them?] (Y/N) " -n 1 -r
+    read -p "<<<<< Do you want to delete it? (Y/N) " -n 1 -r
     echo ""
     if [[ $REPLY =~ ^[Yy]$ ]]; then
       for (( i=$i_before; i<=$i_after; i++ )); do unset lines[$i]; done
@@ -58,6 +57,7 @@ function search-and-replace()
   fi
 
   # save new version of the file
+  # if a file for "replacement" is provided, add info from this file
   if [ ! -z "$5" ]; then
     (IFS=$'\n'; echo "${lines[*]:0:$i_before}") > $file
     cat $5 >> $file

@@ -38,11 +38,11 @@ get_branch=$SCRIPT_PATH/get-branch.sh
 # function to replace standard old URL
 replace_old_urls=$SCRIPT_PATH/replace-old-urls.sh
 
-# function to check for any mention of nc.deep-hybrid-datacloud.eu
-check_old_nc=$SCRIPT_PATH/check-old-nc.sh
-
 # function to find and delete a piece of text/paragraph
 search_and_replace=$SCRIPT_PATH/search-and-replace.sh
+
+# function to update requirements.txt with relevant versions
+update_reqs=$SCRIPT_PATH/update-reqs.sh
 
 ## Let's start
 # 1. Configure repo URLs, retrieve names of defaults branches
@@ -98,10 +98,6 @@ git push --mirror $AI4_CODE_REPO_URL
 cd ..
 echo "[INFO] Cleaning now local directory ${DEEP_CODE_REPO}.git"
 rm -rf ${DEEP_CODE_REPO}.git
-#read -p "Delete now local directory ${DEEP_CODE_REPO}.git (advised)? (Y/N) " -n 1 -r
-#if [[ $REPLY =~ ^[Yy]$ ]]
-#then
-#fi
 
 # Copy original Dockerfile, metadata.json to the code repo
 echo ""
@@ -150,20 +146,31 @@ export AI4_CODE_REPO_JENKINS_BADGE="https://jenkins.services.ai4os.eu/buildStatu
 export AI4_CODE_REPO_JENKINS_URL="https://jenkins.services.ai4os.eu/job/AI4OS-hub/job/${AI4_CODE_REPO}/job/${AI4_CODE_REPO_BRANCH}/"
 
 $replace_old_urls metadata.json
-$check_old_nc metadata.json
 
 sed -i "s,http://github.com,https://github.com,gI" setup.cfg  # in case "http://" is wrongly given for github.com
 $replace_old_urls setup.cfg
 sed -i "s,%2F,/,gI" README.md # replace "%2F" code with "/"
 $replace_old_urls README.md
-$check_old_nc README.md
 
-git commit -a -m "feat: migration-2, Update files for AI4OS URL values"
+DEEP_NC="nc.deep-hybrid-datacloud.eu"
+echo "[INFO] Checking for the old Nextcloud link ($DEEP_NC).."
+grep -rnw './' -e $DEEP_NC
+deep_nc_found=$?
+if [ "$deep_nc_found" -eq 0 ]; then
+  echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+  echo "Found mention of the old Nextcloud, ${DEEP_NC}"
+  echo "Please, consider manually updating corresponding files! (see above)"
+  echo "Directory: $PWD"
+  echo "FYI: AI4OS Nextcloud: https://share.services.ai4os.eu"
+  echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+fi
+read -p "Press enter if you updated Nextcloud links or want to continue migration anyway"
+echo ""
+git commit -a -m "feat: migration-2, Update files with AI4OS URL values"
 
-
-# 4. Update Dockerfile, requirements, and test-requirements. MOSTLY MANUAL PROCESS!
+# 4. Update Dockerfile, requirements, and test-requirements. very much MANUAL process!
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-echo "4. PRETTY MUCH MANUAL PROCESS to Update: "
+echo "4. Very much MANUAL process to Update: "
 echo " * Dockerfile"
 echo " * requirements.txt"
 echo " * test-requirements.txt / requirements-test.txt"
@@ -173,8 +180,9 @@ read -p "Press enter to continue"
 echo ""
 echo "[INFO] Replacing and checking old URLs in Dockerfile..."
 $replace_old_urls Dockerfile
-$check_old_nc Dockerfile
 sed -i "s,$DEEP_CODE_REPO,$AI4_CODE_REPO,gI" Dockerfile  # replace remaining "DEEP_CODE_REPO"
+# backup Dockerfile
+cp Dockerfile Dockerfile.bkp
 echo ""
 echo "[INFO] Removing old pyVer config..."
 # delete old pyVer ARG
@@ -194,7 +202,7 @@ $search_and_replace Dockerfile "/ARG/ && /jlab/"
 $search_and_replace Dockerfile "/ENV/ && /JUPYTER_CONFIG_DIR/" 1 0
 $search_and_replace Dockerfile "/RUN/ && /jlab/ && /true/" 0
 echo ""
-echo "[INFO] Removing Onedata installation..."
+echo "[INFO] Removing ONEDATA installation..."
 # delete old oneclient_ver ARG
 $search_and_replace Dockerfile "/ARG/ && /oneclient_ver/" 1 0
 # delete old oneclient installation
@@ -204,11 +212,16 @@ echo ""
 echo "[INFO] Removing FLAAT installation via Dockerfile..."
 $search_and_replace Dockerfile "/#/ && /FLAAT/" 1
 echo ""
-echo "[INFO] Removing old install of deep-start..."
+echo "[INFO] Removing/Replacing old install of deep-start..."
 $search_and_replace Dockerfile "/RUN/ && /deep-start/" "" 2 ${SCRIPT_PATH}/tmpl-deep-start.docker
 echo ""
-echo "[INFO] Removing old call for deepaas-run"
-$search_and_replace Dockerfile "/CMD/ && /deepaas-run/" "" "" ${SCRIPT_PATH}/tmpl-cmd.docker
+echo "[INFO] Removing entries for ports..."
+$search_and_replace Dockerfile "/EXPOSE/ && /5000/" 1 0
+$search_and_replace Dockerfile "/EXPOSE/ && /6000/" 1 0
+$search_and_replace Dockerfile "/EXPOSE/ && /8888/" 1 0
+echo ""
+echo "[INFO] Re-add ports and Removing/Replacing old call for deepaas-run"
+$search_and_replace Dockerfile "/CMD/ && /deepaas-run/" "" "" ${SCRIPT_PATH}/tmpl-ports-cmd.docker
 
 read -p "Do you want now manually inspect Dockerfile (advised!)? (Y/N) " -n 1 -r
 if [[ $REPLY =~ ^[Yy]$ ]]; then
@@ -219,7 +232,22 @@ fi
 AI4_CODE_REPO_TEST_REQUIREMENTS="test-requirements.txt"
 ls -1 |grep "requirements-test.txt"
 [[ $? -eq 0 ]] && AI4_CODE_REPO_TEST_REQUIREMENTS="requirements-test.txt"
+
+echo "[INFO] Getting list of pre-installed packages in the old Docker image"
+DEEP_DOCKER_REPO=$(echo "deephdc/${DEEP_DOCKERFILE_REPO}" | awk '{print tolower($0)}')
+DEEP_DOCKER_PIP_FREEZE=$(docker run --rm -ti "$DEEP_DOCKER_REPO" pip freeze)
+echo "[INFO] Update requirements with relevant versions"
+$update_reqs requirements.txt "${DEEP_DOCKER_PIP_FREEZE[*]}"
+
+# allow to manually modify the (test-)requirements.txt file
+read -p "Do you want now manually inspect $AI4_CODE_REPO_TEST_REQUIREMENTS (advised!)? (Y/N) " -n 1 -r
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+   "${EDITOR:-nano}" $AI4_CODE_REPO_TEST_REQUIREMENTS
+fi
+
 exit 1
+git commit -a -m "feat: migration-3, update Dockerfile, requirements(-test).txt files"
+git push origin
 
 # 5. Delete/Re-add Jenkinsfile
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
