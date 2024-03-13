@@ -212,7 +212,7 @@ echo ""
 echo "[INFO] Removing FLAAT installation via Dockerfile..."
 $search_and_replace Dockerfile "/#/ && /FLAAT/" 1
 echo ""
-echo "[INFO] Removing/Replacing old install of deep-start..."
+echo "[INFO] Replacing old install of deep-start..."
 $search_and_replace Dockerfile "/RUN/ && /deep-start/" "" 2 ${SCRIPT_PATH}/tmpl-deep-start.docker
 echo ""
 echo "[INFO] Removing entries for ports..."
@@ -220,7 +220,7 @@ $search_and_replace Dockerfile "/EXPOSE/ && /5000/" 1 0
 $search_and_replace Dockerfile "/EXPOSE/ && /6000/" 1 0
 $search_and_replace Dockerfile "/EXPOSE/ && /8888/" 1 0
 echo ""
-echo "[INFO] Re-add ports and Removing/Replacing old call for deepaas-run"
+echo "[INFO] Re-add ports and Replacing old call for deepaas-run"
 $search_and_replace Dockerfile "/CMD/ && /deepaas-run/" "" "" ${SCRIPT_PATH}/tmpl-ports-cmd.docker
 
 read -p "Do you want now manually inspect Dockerfile (advised!)? (Y/N) " -n 1 -r
@@ -262,9 +262,9 @@ read -p "Press enter to continue"
 # create Jenkinsfile from the template
 cp ${SCRIPT_PATH}/cp-Jenkinsfile ./Jenkinsfile
 # check for the base_cpu_tag
-export $(cat ../${DEEP_DOCKERFILE_REPO}/Jenkinsfile |grep -i "base_cpu_tag" |head -n1 |tr -d ' ' |sed 's/"//g')
+DOCKER_BASE_CPU_TAG=$(cat ../${DEEP_DOCKERFILE_REPO}/Jenkinsfile |grep -i "base_cpu_tag" |head -n1 |tr -d ' ' |sed 's/"//g')
 # check for the base_gpu_tag
-export $(cat ../${DEEP_DOCKERFILE_REPO}/Jenkinsfile |grep -i "base_gpu_tag" |head -n1 |tr -d ' ' |sed 's/"//g')
+DOCKER_BASE_GPU_TAG=$(cat ../${DEEP_DOCKERFILE_REPO}/Jenkinsfile |grep -i "base_gpu_tag" |head -n1 |tr -d ' ' |sed 's/"//g')
 # create JenkinsConstants.groovy from the template
 sed -e "s,DOCKER_BASE_CPU_TAG,${base_cpu_tag},g" \
     -e "s,DOCKER_BASE_GPU_TAG,${base_gpu_tag},gI" \
@@ -308,9 +308,14 @@ done
 echo "[INFO] Configured CI/CD image for the code testing: ${AI4_CICD_DOCKER_IMAGE}"
 # create .sqa/docker-compose.yml from the template
 sed "s,AI4_CICD_DOCKER_IMAGE,${AI4_CICD_DOCKER_IMAGE},g" ${SCRIPT_PATH}/tmpl-sqa-docker-compose.yml > .sqa/docker-compose.yml
-# create tox.ini from the template
-sed -e "s,AI4_CODE_REPO_TEST_REQUIREMENTS,${AI4_CODE_REPO_TEST_REQUIREMENTS},gI" \
-    -e "s,AI4_CODE_REPO,${AI4_CODE_REPO},gI" ${SCRIPT_PATH}/tmpl-tox.ini > tox.ini
+read -p "Do you want to recreate *tox.ini* file? (Y/N) " -n 1 -r
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+   # create tox.ini from the template
+   # get the python package name:
+   AI4_CODE_PYPKG=$(python3 ./setup.py --quiet --name)
+   sed -e "s,AI4_CODE_REPO_TEST_REQUIREMENTS,${AI4_CODE_REPO_TEST_REQUIREMENTS},gI" \
+       -e "s,AI4_CODE_PYPKG,${AI4_CODE_REPO},gI" ${SCRIPT_PATH}/tmpl-tox.ini > tox.ini
+fi
 # Delete: .stestr.conf as we don't use it anymore
 git rm .stestr.conf
 git add Jenkinsfile JenkinsConstants.groovy tox.ini .sqa/*
@@ -322,6 +327,6 @@ AI4_DOCKER_REPO=$(echo "ai4oshub/${AI_CODE_REPO}" | awk '{print tolower($0)}')
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 read -p "6. Do you want now try to build $AI4_DOCKER_REPO Docker image locally? (Y/N) " -n 1 -r
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-   docker build --no-cache -t $AI4_DOCKER_REPO
+   docker build --no-cache -t $AI4_DOCKER_REPO .
 fi
 
