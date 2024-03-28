@@ -314,7 +314,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
    # get the python package name:
    AI4_CODE_PYPKG=$(python3 ./setup.py --quiet --name)
    sed -e "s,AI4_CODE_REPO_TEST_REQUIREMENTS,${AI4_CODE_REPO_TEST_REQUIREMENTS},gI" \
-       -e "s,AI4_CODE_PYPKG,${AI4_CODE_REPO},gI" ${SCRIPT_PATH}/tmpl-tox.ini > tox.ini
+       -e "s,AI4_CODE_PYPKG,${AI4_CODE_PYPKG},gI" ${SCRIPT_PATH}/tmpl-tox.ini > tox.ini
 fi
 # Delete: .stestr.conf as we don't use it anymore
 git rm .stestr.conf
@@ -323,7 +323,7 @@ git commit -a -m "feat: migration-4, add Jenkins CI/CD with JePL2 (.sqa, tox.ini
 git push origin
 
 # 6. Try to build Docker image locally
-AI4_DOCKER_REPO=$(echo "ai4oshub/${AI_CODE_REPO}" | awk '{print tolower($0)}')
+AI4_DOCKER_REPO=$(echo "ai4oshub/${AI4_CODE_REPO}" | awk '{print tolower($0)}')
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 read -p "6. Do you want now try to build $AI4_DOCKER_REPO Docker image locally? (Y/N) " -n 1 -r
 if [[ $REPLY =~ ^[Yy]$ ]]; then
