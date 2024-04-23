@@ -69,6 +69,12 @@ function search-and-replace()
 }
 
 # call the function:
+# positional arguments: 
+# 1 - file to search for replacement
+# 2 - pattern to search for
+# 3 - (optional) how many lines before the found line to include for replacement
+# 4 - (optional) how many lines after the found line to include for replacement
+# 5 - (optional) file containing replacement text
 # search-and-replace Dockerfile "/RUN/ && /jlab/ && /true/"
 # (optionally) one can define "lines before and after":
 # search-and-replace Dockerfile "/RUN/ && /jlab/ && /true/" 1 0
