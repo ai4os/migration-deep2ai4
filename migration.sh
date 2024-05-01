@@ -180,7 +180,6 @@ read -p "Press enter to continue"
 echo ""
 echo "[INFO] Replacing and checking old URLs in Dockerfile..."
 $replace_old_urls Dockerfile
-sed -i "s,$DEEP_CODE_REPO,$AI4_CODE_REPO,gI" Dockerfile  # replace remaining "DEEP_CODE_REPO"
 # backup Dockerfile
 cp Dockerfile Dockerfile.bkp
 echo ""
@@ -215,7 +214,7 @@ echo ""
 echo "[INFO] Replacing old install of deep-start..."
 $search_and_replace Dockerfile "/RUN/ && /deep-start/" "" 2 ${SCRIPT_PATH}/tmpl-deep-start.docker
 echo ""
-echo "[INFO] Removing entries for ports..."
+echo "[INFO] Removing entries for ports...(will re-add later)"
 $search_and_replace Dockerfile "/EXPOSE/ && /5000/" 1 0
 $search_and_replace Dockerfile "/EXPOSE/ && /6000/" 1 0
 $search_and_replace Dockerfile "/EXPOSE/ && /8888/" 1 0
@@ -262,13 +261,20 @@ read -p "Press enter to continue"
 # create Jenkinsfile from the template
 cp ${SCRIPT_PATH}/cp-Jenkinsfile ./Jenkinsfile
 # check for the base_cpu_tag
-DOCKER_BASE_CPU_TAG=$(cat ../${DEEP_DOCKERFILE_REPO}/Jenkinsfile |grep -i "base_cpu_tag" |head -n1 |tr -d ' ' |sed 's/"//g')
+base_cpu_tag=$(cat ../${DEEP_DOCKERFILE_REPO}/Jenkinsfile |grep -i "base_cpu_tag" |head -n1 |tr -d ' ' |sed 's/"//g')
+DOCKER_BASE_CPU_TAG=${base_cpu_tag#*=}
 # check for the base_gpu_tag
-DOCKER_BASE_GPU_TAG=$(cat ../${DEEP_DOCKERFILE_REPO}/Jenkinsfile |grep -i "base_gpu_tag" |head -n1 |tr -d ' ' |sed 's/"//g')
+base_gpu_tag=$(cat ../${DEEP_DOCKERFILE_REPO}/Jenkinsfile |grep -i "base_gpu_tag" |head -n1 |tr -d ' ' |sed 's/"//g')
+DOCKER_BASE_GPU_TAG=${base_gpu_tag#*=}
 # create JenkinsConstants.groovy from the template
-sed -e "s,DOCKER_BASE_CPU_TAG,${base_cpu_tag},g" \
-    -e "s,DOCKER_BASE_GPU_TAG,${base_gpu_tag},gI" \
+sed -e "s,DOCKER_BASE_CPU_TAG,${DOCKER_BASE_CPU_TAG},g" \
+    -e "s,DOCKER_BASE_GPU_TAG,${DOCKER_BASE_GPU_TAG},gI" \
     ${SCRIPT_PATH}/tmpl-JenkinsConstants.groovy > JenkinsConstants.groovy
+# allow to manually modify the JenkinsConstants.groovy
+read -p "Do you want now manually inspect JenkinsConstants.groovy (advised!)? (Y/N) " -n 1 -r
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+   "${EDITOR:-nano}" JenkinsConstants.groovy
+fi
 mkdir .sqa
 # create .sqa/config.yml from the template
 sed "s,AI4_CODE_REPO,${AI4_CODE_REPO},g" ${SCRIPT_PATH}/tmpl-sqa-config.yml > .sqa/config.yml
@@ -318,6 +324,20 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
 fi
 # Delete: .stestr.conf as we don't use it anymore
 git rm .stestr.conf
+
+# Final check, if there is any mention of DEEPHDC anywhere
+grep -rnw './' -e "deephdc"
+deep_found=$?
+if [ "$deep_found" -eq 0 ]; then
+  echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+  echo "Found mention(s) of \"deephdc\""
+  echo "Please, consider manually updating corresponding files! (see above)"
+  echo "Directory: $PWD"
+  echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+  read -p "Press Enter if you updated necessary files or want to continue migration anyway"
+  echo ""
+fi
+
 git add Jenkinsfile JenkinsConstants.groovy tox.ini .sqa/*
 git commit -a -m "feat: migration-4, add Jenkins CI/CD with JePL2 (.sqa, tox.ini)"
 git push origin
