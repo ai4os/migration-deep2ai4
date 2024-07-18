@@ -32,6 +32,32 @@ function check-url()
   fi
 }
 
+function load-nano()
+{ local file=$1
+  read -p "Do you want now manually inspect ${file} (advised!)? (Y/N) " -n 1 -r
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+     "${EDITOR:-nano}" $file
+  fi
+}
+
+function grep_remains()
+{ local search_str=$1
+  local found_this=127
+  echo ">>> Now checking for \"${search_str}\" remaining mentions, see print-outs below:"
+
+  grep -rnwi './' --exclude '*.bkp' --exclude-dir '.git' -e $search_str
+  found_this=$?
+
+  if [ "$found_this" -eq 0 ]; then
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "Found mention(s) of $search_str"
+    echo "Please, consider manually updating corresponding files! (see above)"
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    read -p "Press Enter if you updated necessary files or want to continue migration anyway"
+    echo ""
+  fi
+}
+
 # function to get default branch
 get_branch=$SCRIPT_PATH/get-branch.sh
 
@@ -145,16 +171,45 @@ export AI4_DEEPAAS_REPO_URL="https://github.com/ai4os/DEEPaaS"
 export AI4_CODE_REPO_JENKINS_BADGE="https://jenkins.services.ai4os.eu/buildStatus/icon?job=AI4OS-hub/${AI4_CODE_REPO}/${AI4_CODE_REPO_BRANCH}"
 export AI4_CODE_REPO_JENKINS_URL="https://jenkins.services.ai4os.eu/job/AI4OS-hub/job/${AI4_CODE_REPO}/job/${AI4_CODE_REPO_BRANCH}/"
 
+# update metadata.json
 $replace_old_urls metadata.json
+cp metadata.json metadata.bkp && jq '.sources += { "ai4_template": "ai4-template/1.9.9"}' metadata.bkp > metadata.json
+load-nano metadata.json
 
-sed -i "s,http://github.com,https://github.com,gI" setup.cfg  # in case "http://" is wrongly given for github.com
-$replace_old_urls setup.cfg
+if [ -e "setup.cfg" ]; then
+  AI4_CODE_PYPKG=$(python3 ./setup.py --quiet --name)
+  read -p "Do you want to replace setup.cfg and setup.py with pyproject.toml? (Y/N) " -n 1 -r
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    AI4_CODE_CAPITAL=$(echo "$AI4_CODE_PYPKG" | awk '{print toupper($0)}')
+    AI4_CODE_AUTHORS="name = \"$(python3 ./setup.py --quiet --author)\", email = \"$(python3 ./setup.py --quiet --author-email)\""
+    AI4_CODE_DESCRIPTION=$(python3 ./setup.py --quiet --description)
+    AI4_CODE_LICENSE=$(python3 ./setup.py --quiet --license)
+    sed -e "s,AI4_CODE_PYPKG,${AI4_CODE_PYPKG},gI" \
+        -e "s,AI4_CODE_CAPITAL,${AI4_CODE_CAPITAL},gI" \
+        -e "s,AI4_CODE_AUTHORS,${AI4_CODE_AUTHORS},gI" \
+        -e "s,AI4_CODE_DESCRIPTION,${AI4_CODE_DESCRIPTION},gI" \
+        -e "s,AI4_CODE_LICENSE,${AI4_CODE_LICENSE},gI" \
+        ${SCRIPT_PATH}/tmpl-pyproject.toml > pyproject.toml
+    git add pyproject.toml
+    load_nano pyproject.toml
+    rm setup.cfg setup.py
+  else
+    sed -i "s,http://github.com,https://github.com,gI" setup.cfg  # in case "http://" is wrongly given for github.com
+    $replace_old_urls setup.cfg
+  fi
+fi
+
+if [ -e "pyproject.toml" ]; then
+  AI4_CODE_PYPKG=$(cat pyproject.toml | grep -A1 "deepaas.v2.model" \
+    | cut -d"]" -f2 |cut -d"=" -f2 | tr -d '[:space:]' |tr -d '\"' |cut -d'.' -f1 )
+fi
+
 sed -i "s,%2F,/,gI" README.md # replace "%2F" code with "/"
 $replace_old_urls README.md
 
 DEEP_NC="nc.deep-hybrid-datacloud.eu"
 echo "[INFO] Checking for the old Nextcloud link ($DEEP_NC).."
-grep -rnw './' -e $DEEP_NC
+grep -rnw './' --exclude *.bkp -e $DEEP_NC
 deep_nc_found=$?
 if [ "$deep_nc_found" -eq 0 ]; then
   echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
@@ -167,6 +222,7 @@ if [ "$deep_nc_found" -eq 0 ]; then
   echo ""
 fi
 git commit -a -m "feat: migration-2, Update files with AI4OS URL values"
+git push origin
 
 # 4. Update Dockerfile, requirements, and test-requirements. very much MANUAL process!
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
@@ -222,10 +278,7 @@ echo ""
 echo "[INFO] Re-add ports and Replacing old call for deepaas-run"
 $search_and_replace Dockerfile "/CMD/ && /deepaas-run/" "" "" ${SCRIPT_PATH}/tmpl-ports-cmd.docker
 
-read -p "Do you want now manually inspect Dockerfile (advised!)? (Y/N) " -n 1 -r
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-   "${EDITOR:-nano}" Dockerfile
-fi
+load-nano Dockerfile
 
 # find the name of "requirements.txt" file for tests
 AI4_CODE_REPO_TEST_REQUIREMENTS="test-requirements.txt"
@@ -237,12 +290,11 @@ DEEP_DOCKER_REPO=$(echo "deephdc/${DEEP_DOCKERFILE_REPO}" | awk '{print tolower(
 DEEP_DOCKER_PIP_FREEZE=$(docker run --rm -ti "$DEEP_DOCKER_REPO" pip freeze)
 echo "[INFO] Update requirements with relevant versions"
 $update_reqs requirements.txt "${DEEP_DOCKER_PIP_FREEZE[*]}"
+# allow to manually modify the requirements.txt file
+load-nano requirements.txt
 
 # allow to manually modify the (test-)requirements.txt file
-read -p "Do you want now manually inspect $AI4_CODE_REPO_TEST_REQUIREMENTS (advised!)? (Y/N) " -n 1 -r
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-   "${EDITOR:-nano}" $AI4_CODE_REPO_TEST_REQUIREMENTS
-fi
+load-nano $AI4_CODE_REPO_TEST_REQUIREMENTS
 
 git commit -a -m "feat: migration-3, update Dockerfile, requirements(-test).txt files"
 git push origin
@@ -271,10 +323,8 @@ sed -e "s,DOCKER_BASE_CPU_TAG,${DOCKER_BASE_CPU_TAG},g" \
     -e "s,DOCKER_BASE_GPU_TAG,${DOCKER_BASE_GPU_TAG},gI" \
     ${SCRIPT_PATH}/tmpl-JenkinsConstants.groovy > JenkinsConstants.groovy
 # allow to manually modify the JenkinsConstants.groovy
-read -p "Do you want now manually inspect JenkinsConstants.groovy (advised!)? (Y/N) " -n 1 -r
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-   "${EDITOR:-nano}" JenkinsConstants.groovy
-fi
+load-nano JenkinsConstants.groovy
+
 mkdir .sqa
 # create .sqa/config.yml from the template
 sed "s,AI4_CODE_REPO,${AI4_CODE_REPO},g" ${SCRIPT_PATH}/tmpl-sqa-config.yml > .sqa/config.yml
@@ -317,26 +367,25 @@ sed "s,AI4_CICD_DOCKER_IMAGE,${AI4_CICD_DOCKER_IMAGE},g" ${SCRIPT_PATH}/tmpl-sqa
 read -p "Do you want to recreate *tox.ini* file? (Y/N) " -n 1 -r
 if [[ $REPLY =~ ^[Yy]$ ]]; then
    # create tox.ini from the template
-   # get the python package name:
-   AI4_CODE_PYPKG=$(python3 ./setup.py --quiet --name)
+   # AI4_CODE_PYPKG is set above (stage 3)
    sed -e "s,AI4_CODE_REPO_TEST_REQUIREMENTS,${AI4_CODE_REPO_TEST_REQUIREMENTS},gI" \
        -e "s,AI4_CODE_PYPKG,${AI4_CODE_PYPKG},gI" ${SCRIPT_PATH}/tmpl-tox.ini > tox.ini
 fi
 # Delete: .stestr.conf as we don't use it anymore
 git rm .stestr.conf
 
-# Final check, if there is any mention of DEEPHDC anywhere
-grep -rnw './' -e "deephdc"
-deep_found=$?
-if [ "$deep_found" -eq 0 ]; then
-  echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-  echo "Found mention(s) of \"deephdc\""
-  echo "Please, consider manually updating corresponding files! (see above)"
-  echo "Directory: $PWD"
-  echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-  read -p "Press Enter if you updated necessary files or want to continue migration anyway"
-  echo ""
-fi
+# Final check, if there is any mention of some old names anywhere
+echo "#####################################################################################"
+echo " Final checks if any mention of old names (deephdc, reponame, etc) remained anywhere "
+echo " Searching in $PWD"
+echo "#####################################################################################"
+echo ""
+grep_remains "deephdc"
+echo ""
+grep_remains $DEEP_CODE_REPO
+echo ""
+grep_remains "DEEP-OC"
+echo ""
 
 git add Jenkinsfile JenkinsConstants.groovy tox.ini .sqa/*
 git commit -a -m "feat: migration-4, add Jenkins CI/CD with JePL2 (.sqa, tox.ini)"

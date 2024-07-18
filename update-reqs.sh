@@ -51,11 +51,6 @@ function update-reqs()
   return_code=$?
   if [ "$return_code" -eq 0 ]; then rm $file_tmp; fi
 
-  # allow to manually modify the file
-  read -p "Do you want now manually inspect $file (advised!)? (Y/N) " -n 1 -r
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-     "${EDITOR:-nano}" $file
-  fi
 }
 
 # example call:
